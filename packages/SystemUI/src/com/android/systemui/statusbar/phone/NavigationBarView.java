@@ -30,6 +30,7 @@ import android.os.Message;
 import android.os.ServiceManager;
 import android.util.AttributeSet;
 import android.util.Slog;
+import android.util.DisplayMetrics;
 import android.view.animation.AccelerateInterpolator;
 import android.view.Display;
 import android.view.MotionEvent;
@@ -383,7 +384,16 @@ public class NavigationBarView extends LinearLayout {
     }
 
     public void reorient() {
-        final int rot = mDisplay.getRotation();
+        int rot = mDisplay.getRotation();
+
+	DisplayMetrics dm = new DisplayMetrics();
+	((WindowManager)mContext.getSystemService(
+                Context.WINDOW_SERVICE)).getDefaultDisplay().getMetrics(dm);
+
+        if(dm.widthPixels <= 800 && dm.heightPixels <= 480) {
+	    rot = Surface.ROTATION_90;
+        }
+
         for (int i=0; i<4; i++) {
             mRotatedViews[i].setVisibility(View.GONE);
         }

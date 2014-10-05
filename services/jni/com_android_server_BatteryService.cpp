@@ -20,6 +20,7 @@
 #include "jni.h"
 #include <utils/Log.h>
 #include <utils/misc.h>
+#include <cutils/properties.h>
 
 #include <fcntl.h>
 #include <stdio.h>
@@ -233,7 +234,7 @@ static void android_server_BatteryService_update(JNIEnv* env, jobject obj)
     setIntField(env, obj, gPaths.batteryCapacityPath, gFieldIds.mBatteryLevel);
     setVoltageField(env, obj, gPaths.batteryVoltagePath, gFieldIds.mBatteryVoltage);
     setIntField(env, obj, gPaths.batteryTemperaturePath, gFieldIds.mBatteryTemperature);
-    
+
     const int SIZE = 128;
     char buf[SIZE];
     
@@ -283,9 +284,19 @@ static void android_server_BatteryService_update(JNIEnv* env, jobject obj)
         }
     }
 
-    env->SetBooleanField(obj, gFieldIds.mAcOnline, acOnline);
-    env->SetBooleanField(obj, gFieldIds.mUsbOnline, usbOnline);
-    env->SetBooleanField(obj, gFieldIds.mWirelessOnline, wirelessOnline);
+    char prop[5];
+    // always report AC plug-in and capacity 100% if emulated.battery is set to 1
+    property_get("sys.emulated.battery", prop, "0");
+    if (!strcmp(prop, "1")){
+        env->SetBooleanField(obj, gFieldIds.mAcOnline, true);
+        env->SetIntField(obj, gFieldIds.mBatteryLevel, 100);
+        env->SetBooleanField(obj, gFieldIds.mWirelessOnline, false);
+    }
+    else {
+        env->SetBooleanField(obj, gFieldIds.mAcOnline, acOnline);
+        env->SetBooleanField(obj, gFieldIds.mUsbOnline, usbOnline);
+        env->SetBooleanField(obj, gFieldIds.mWirelessOnline, wirelessOnline);
+    }
 }
 
 static JNINativeMethod sMethods[] = {

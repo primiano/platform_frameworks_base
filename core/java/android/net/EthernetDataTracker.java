@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2010 The Android Open Source Project
+ * Copyright (C) 2013 Freescale Semiconductor, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,7 +26,9 @@ import android.os.Message;
 import android.os.Messenger;
 import android.os.RemoteException;
 import android.os.ServiceManager;
+import android.os.SystemProperties;
 import android.util.Log;
+import android.os.PowerManager;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -46,11 +49,14 @@ public class EthernetDataTracker implements NetworkStateTracker {
     private AtomicBoolean mDefaultRouteSet = new AtomicBoolean(false);
 
     private static boolean mLinkUp;
+    private static boolean mNfsmode;
+    private static boolean mAlwayson;
     private LinkProperties mLinkProperties;
     private LinkCapabilities mLinkCapabilities;
     private NetworkInfo mNetworkInfo;
     private InterfaceObserver mInterfaceObserver;
     private String mHwAddr;
+    private static PowerManager.WakeLock mEthernetWakeLock;
 
     /* For sending events to connectivity service handler */
     private Handler mCsHandler;
@@ -78,12 +84,18 @@ public class EthernetDataTracker implements NetworkStateTracker {
             if (mIface.equals(iface)) {
                 Log.d(TAG, "Interface " + iface + " link " + (up ? "up" : "down"));
                 mLinkUp = up;
+                mNfsmode = "yes".equals(SystemProperties.get("ro.nfs.mode", "no"));
+                mAlwayson = "yes".equals(SystemProperties.get("ro.ethernet.alwayson.mode", "yes"));
                 mTracker.mNetworkInfo.setIsAvailable(up);
 
                 // use DHCP
                 if (up) {
+                    if (mAlwayson)
+                        mEthernetWakeLock.acquire();
                     mTracker.reconnect();
                 } else {
+                    if (mAlwayson)
+                        mEthernetWakeLock.release();
                     mTracker.disconnect();
                 }
             }
@@ -150,12 +162,14 @@ public class EthernetDataTracker implements NetworkStateTracker {
         msg = mCsHandler.obtainMessage(EVENT_STATE_CHANGED, mNetworkInfo);
         msg.sendToTarget();
 
-        IBinder b = ServiceManager.getService(Context.NETWORKMANAGEMENT_SERVICE);
-        INetworkManagementService service = INetworkManagementService.Stub.asInterface(b);
-        try {
-            service.clearInterfaceAddresses(mIface);
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to clear addresses or disable ipv6" + e);
+        if (!mNfsmode) {
+           IBinder b = ServiceManager.getService(Context.NETWORKMANAGEMENT_SERVICE);
+           INetworkManagementService service = INetworkManagementService.Stub.asInterface(b);
+           try {
+               service.clearInterfaceAddresses(mIface);
+           } catch (Exception e) {
+               Log.e(TAG, "Failed to clear addresses or disable ipv6" + e);
+           }
         }
     }
 
@@ -210,6 +224,9 @@ public class EthernetDataTracker implements NetworkStateTracker {
         mContext = context;
         mCsHandler = target;
 
+        final PowerManager powerManager = (PowerManager)context.getSystemService(
+                Context.POWER_SERVICE);
+        mEthernetWakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, TAG);
         // register for notifications from NetworkManagement Service
         IBinder b = ServiceManager.getService(Context.NETWORKMANAGEMENT_SERVICE);
         mNMService = INetworkManagementService.Stub.asInterface(b);
@@ -227,7 +244,6 @@ public class EthernetDataTracker implements NetworkStateTracker {
                     mIface = iface;
                     mNMService.setInterfaceUp(iface);
                     InterfaceConfiguration config = mNMService.getInterfaceConfig(iface);
-                    mLinkUp = config.hasFlag("up");
                     if (config != null && mHwAddr == null) {
                         mHwAddr = config.getHardwareAddress();
                         if (mHwAddr != null) {
